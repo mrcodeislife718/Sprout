@@ -80,12 +80,13 @@ export function createSsrResult(vnode, { state = {}, head = [] } = {}) {
 
 export function hydrate(vnode, container, { state = null } = {}) {
   if (!container) throw new TypeError('hydrate requires a container');
-  // Hydration preserves the server container when its normalized markup matches;
-  // otherwise it performs a deterministic client render.
   const expected = renderToString(vnode);
-  if (normalizeHtml(container.innerHTML) !== normalizeHtml(expected)) render(vnode, container);
+  const expectedNormalized = normalizeExpectedHtml(expected, container.ownerDocument);
+  const currentNormalized = normalizeHtml(container.innerHTML);
+  const matched = currentNormalized === expectedNormalized;
+  if (!matched) render(vnode, container);
   container.dataset && (container.dataset.sproutHydrated = 'true');
-  return { container, state, matched: normalizeHtml(container.innerHTML) === normalizeHtml(expected) };
+  return { container, state, matched };
 }
 
 export class NativeRenderer {
@@ -120,4 +121,10 @@ export function createDataResource(loader, keySignal) {
 function compileRoute(pattern) { const names = []; const regexText = pattern.split('/').map((part) => part.startsWith(':') ? (names.push(part.slice(1)), '([^/]+)') : part === '*' ? '(.*)' : escapeRegex(part)).join('/'); return { names, regex: new RegExp(`^${regexText}/?$`) }; }
 function escapeRegex(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function normalizeHtml(value) { return String(value).replace(/\s+/g, ' ').replace(/> </g, '><').trim(); }
+function normalizeExpectedHtml(value, documentRef) {
+  if (!documentRef?.createElement) return normalizeHtml(value);
+  const template = documentRef.createElement('div');
+  template.innerHTML = value;
+  return normalizeHtml(template.innerHTML);
+}
 function resolve(vnode) { if (vnode?.type && typeof vnode.type === 'function') return resolve(vnode.type({ ...vnode.props, children: vnode.children })); return vnode; }
