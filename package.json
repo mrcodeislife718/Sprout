@@ -1,0 +1,14 @@
+{
+  "name": "@cannon/sprout",
+  "version": "0.1.0",
+  "description": "Sprout UI runtime for the Cannon ecosystem.",
+  "type": "module",
+  "exports": "./src/index.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
