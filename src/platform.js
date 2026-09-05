@@ -80,13 +80,78 @@ export function createSsrResult(vnode, { state = {}, head = [] } = {}) {
 
 export function hydrate(vnode, container, { state = null } = {}) {
   if (!container) throw new TypeError('hydrate requires a container');
-  const expected = renderToString(vnode);
+  const resolved = resolve(vnode);
+  const expected = renderToString(resolved);
   const expectedNormalized = normalizeExpectedHtml(expected, container.ownerDocument);
   const currentNormalized = normalizeHtml(container.innerHTML);
-  const matched = currentNormalized === expectedNormalized;
-  if (!matched) render(vnode, container);
-  container.dataset && (container.dataset.sproutHydrated = 'true');
+  let matched = currentNormalized === expectedNormalized;
+
+  if (matched) {
+    try {
+      const nodes = [...container.childNodes];
+      const consumed = hydrateChildren([resolved], nodes, container.ownerDocument ?? globalThis.document);
+      if (consumed !== nodes.length) throw new Error('SSR node count does not match Sprout tree');
+    } catch {
+      matched = false;
+    }
+  }
+
+  if (!matched) render(resolved, container);
+  if (container.dataset) container.dataset.sproutHydrated = 'true';
   return { container, state, matched };
+}
+
+function hydrateChildren(vnodes, domNodes, documentRef) {
+  let domIndex = 0;
+  for (const original of vnodes) {
+    const vnode = resolve(original);
+    if (vnode?.type === Symbol.for('sprout.fragment')) {
+      domIndex += hydrateChildren(vnode.children ?? [], domNodes.slice(domIndex), documentRef);
+      continue;
+    }
+    const node = domNodes[domIndex];
+    if (!node) throw new Error('SSR tree ended before Sprout tree');
+    hydrateNode(vnode, node, documentRef);
+    domIndex += 1;
+  }
+  return domIndex;
+}
+
+function hydrateNode(vnode, node, documentRef) {
+  if (isTextVNode(vnode)) {
+    if (node.nodeType !== 3 || node.nodeValue !== String(vnode.value ?? '')) throw new Error('SSR text node does not match Sprout tree');
+    return;
+  }
+  if (node.nodeType !== 1 || node.tagName.toLowerCase() !== String(vnode.type).toLowerCase()) throw new Error('SSR element does not match Sprout tree');
+  applyHydrationProps(node, vnode.props ?? {});
+  const childNodes = [...node.childNodes];
+  const consumed = hydrateChildren(vnode.children ?? [], childNodes, documentRef);
+  if (consumed !== childNodes.length) throw new Error('SSR child count does not match Sprout tree');
+}
+
+function applyHydrationProps(element, props) {
+  for (const [key, value] of Object.entries(props)) {
+    if (key === 'children' || value == null || value === false) continue;
+    if (key.startsWith('on') && typeof value === 'function') {
+      element.addEventListener(key.slice(2).toLowerCase(), value);
+      continue;
+    }
+    if (key === 'style' && value && typeof value === 'object') {
+      for (const [property, styleValue] of Object.entries(value)) element.style[property] = styleValue;
+      continue;
+    }
+    const propertyKey = key === 'className' ? 'className' : key;
+    if (propertyKey in element && typeof value !== 'object') {
+      try { element[propertyKey] = value; continue; } catch {}
+    }
+    const attributeKey = key === 'className' ? 'class' : key === 'tabIndex' ? 'tabindex' : key;
+    if (value === true) element.setAttribute(attributeKey, '');
+    else if (typeof value !== 'object') element.setAttribute(attributeKey, String(value));
+  }
+}
+
+function isTextVNode(vnode) {
+  return vnode?.type?.description === 'sprout.text' || (vnode && 'value' in vnode && Array.isArray(vnode.children) && vnode.children.length === 0);
 }
 
 export class NativeRenderer {
@@ -97,7 +162,7 @@ export class NativeRenderer {
   render(vnode, root) { const node = this.#create(resolve(vnode)); this.adapter.mount(root, node); return node; }
   #create(vnode) {
     if (vnode?.type === Symbol.for('sprout.fragment')) { const fragment = this.adapter.createElement('fragment'); for (const child of vnode.children) this.adapter.appendChild(fragment, this.#create(resolve(child))); return fragment; }
-    if (vnode?.type?.description === 'sprout.text' || (vnode && 'value' in vnode && vnode.children?.length === 0)) return this.adapter.createText(vnode.value ?? '');
+    if (isTextVNode(vnode)) return this.adapter.createText(vnode.value ?? '');
     const element = this.adapter.createElement(vnode.type);
     for (const [key, value] of Object.entries(vnode.props ?? {})) if (key !== 'children' && value !== undefined) this.adapter.setProp(element, key, value);
     for (const child of vnode.children ?? []) this.adapter.appendChild(element, this.#create(resolve(child)));
