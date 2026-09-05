@@ -9,8 +9,10 @@ import { h, signal, render, hydrate, a11y } from '/src/index.js';
 try {
   const count = signal(0);
   const view = () => h('button', { ...a11y.button(), 'aria-disabled':'false', 'data-count':String(count.value), onClick:() => { count.value++; render(view(), document.getElementById('app')); } }, 'Count ' + count.value);
-  const result = hydrate(view(), document.getElementById('app'), { state:{ count:0 } });
-  window.__proof = { matched:result.matched, hydrated:document.getElementById('app').dataset.sproutHydrated };
+  const app = document.getElementById('app');
+  const result = hydrate(view(), app, { state:{ count:0 } });
+  window.__hydratedButton = document.querySelector('button');
+  window.__proof = { matched:result.matched, hydrated:app.dataset.sproutHydrated };
 } catch (error) {
   window.__proofError = { name:error?.name ?? 'Error', message:error?.message ?? String(error), stack:error?.stack ?? null };
 }
@@ -41,13 +43,13 @@ try {
   });
   const initializationError = await page.evaluate(() => window.__proofError ?? null);
   if (initializationError || pageErrors.length) throw new Error(`Sprout browser module failed: ${JSON.stringify({ initializationError, pageErrors })}`);
-  const initial = await page.evaluate(() => ({ proof:window.__proof, text:document.querySelector('button').textContent, role:document.querySelector('button').getAttribute('role'), tabIndex:document.querySelector('button').tabIndex }));
+  const initial = await page.evaluate(() => ({ proof:window.__proof, text:document.querySelector('button').textContent, role:document.querySelector('button').getAttribute('role'), tabIndex:document.querySelector('button').tabIndex, sameHydratedNode:window.__hydratedButton===document.querySelector('button') }));
   if (!initial.proof.matched) throw new Error('SSR markup failed hydration match');
-  if (initial.text !== 'Count 0' || initial.role !== 'button' || initial.tabIndex !== 0) throw new Error(`invalid initial browser state: ${JSON.stringify(initial)}`);
+  if (!initial.sameHydratedNode || initial.text !== 'Count 0' || initial.role !== 'button' || initial.tabIndex !== 0) throw new Error(`invalid initial browser state: ${JSON.stringify(initial)}`);
   await page.click('button');
   await page.waitForFunction(() => document.querySelector('button')?.textContent === 'Count 1');
-  const after = await page.evaluate(() => ({ text:document.querySelector('button').textContent, count:document.querySelector('button').getAttribute('data-count'), role:document.querySelector('button').getAttribute('role'), ariaDisabled:document.querySelector('button').getAttribute('aria-disabled') }));
-  if (after.text !== 'Count 1' || after.count !== '1' || after.role !== 'button' || after.ariaDisabled !== 'false') throw new Error(`browser update/a11y proof failed: ${JSON.stringify(after)}`);
+  const after = await page.evaluate(() => ({ text:document.querySelector('button').textContent, count:document.querySelector('button').getAttribute('data-count'), role:document.querySelector('button').getAttribute('role'), ariaDisabled:document.querySelector('button').getAttribute('aria-disabled'), nodeIdentityPreserved:window.__hydratedButton===document.querySelector('button') }));
+  if (after.text !== 'Count 1' || after.count !== '1' || after.role !== 'button' || after.ariaDisabled !== 'false' || !after.nodeIdentityPreserved) throw new Error(`browser incremental update/a11y proof failed: ${JSON.stringify(after)}`);
 } finally {
   await browser.close();
   await new Promise((resolve)=>server.close(resolve));
