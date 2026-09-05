@@ -49,12 +49,7 @@ export function formState(initial = {}, validators = {}) {
 }
 
 export const a11y = Object.freeze({
-  button(props = {}) {
-    const result = { role: props.role ?? 'button', 'aria-disabled': props.disabled ? 'true' : undefined, ...props };
-    if (props.tabIndex !== undefined) result.tabIndex = props.tabIndex;
-    else if (props.disabled) result.tabIndex = -1;
-    return result;
-  },
+  button(props = {}) { return { role: props.role ?? 'button', tabIndex: props.disabled ? -1 : (props.tabIndex ?? 0), 'aria-disabled': props.disabled ? 'true' : undefined, ...props }; },
   dialog(props = {}) { return { role: 'dialog', 'aria-modal': props.modal === false ? 'false' : 'true', tabIndex: -1, ...props }; },
   input({ label, describedBy, invalid, ...props } = {}) { return { 'aria-label': label, 'aria-describedby': describedBy, 'aria-invalid': invalid ? 'true' : undefined, ...props }; },
   live({ politeness = 'polite', ...props } = {}) { return { 'aria-live': politeness, 'aria-atomic': 'true', ...props }; }
