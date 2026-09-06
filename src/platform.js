@@ -1,4 +1,6 @@
-import { signal, effect, h, render, renderToString } from './index.js';
+import { signal, effect, h, render, renderToString, adoptHydratedRenderState } from './index.js';
+
+const hydrationEvents = new WeakMap();
 
 export function dependencyMap(componentId, dependencies = []) {
   return Object.freeze({ componentId, dependencies: [...new Set(dependencies)].sort(), version: 1 });
@@ -115,6 +117,7 @@ export function hydrate(vnode, container, { state = null } = {}) {
       const nodes = [...container.childNodes];
       const consumed = hydrateChildren([resolved], nodes, container.ownerDocument ?? globalThis.document);
       if (consumed !== nodes.length) throw new Error('SSR node count does not match Sprout tree');
+      adoptHydratedRenderState(resolved, container);
     } catch {
       matched = false;
     }
@@ -157,7 +160,12 @@ function applyHydrationProps(element, props) {
   for (const [key, value] of Object.entries(props)) {
     if (key === 'children' || value == null || value === false) continue;
     if (key.startsWith('on') && typeof value === 'function') {
-      element.addEventListener(key.slice(2).toLowerCase(), value);
+      const event = key.slice(2).toLowerCase();
+      let events = hydrationEvents.get(element);
+      if (!events) { events = new Map(); hydrationEvents.set(element, events); }
+      const previous = events.get(event);
+      if (previous && previous !== value) element.removeEventListener(event, previous);
+      if (previous !== value) { element.addEventListener(event, value); events.set(event, value); }
       continue;
     }
     if (key === 'style' && value && typeof value === 'object') {
