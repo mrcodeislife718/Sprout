@@ -76,6 +76,13 @@ export function render(vnode, container) {
   return container;
 }
 
+export function adoptHydratedRenderState(vnode, container) {
+  if (!container || typeof container.appendChild !== 'function') throw new TypeError('adoptHydratedRenderState requires a DOM-like container');
+  const next = resolveVNode(vnode);
+  renderStates.set(container, { vnode: next });
+  return next;
+}
+
 function patchNode(parent, node, oldVNode, newVNode, documentRef) {
   oldVNode = resolveVNode(oldVNode); newVNode = resolveVNode(newVNode);
   if (!sameVNodeKind(oldVNode, newVNode)) {
