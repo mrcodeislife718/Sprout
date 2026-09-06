@@ -195,15 +195,40 @@ export class NativeRenderer {
 }
 
 export function createDataResource(loader, keySignal) {
+  if (typeof loader !== 'function') throw new TypeError('createDataResource requires a loader function');
   const state = signal({ status: 'idle', data: null, error: null });
-  let controller;
+  let controller = null;
+  let loadId = 0;
+  let disposed = false;
+
   const load = async () => {
-    controller?.abort(); controller = new AbortController();
+    if (disposed) return state.value;
+    const currentId = ++loadId;
+    controller?.abort();
+    const currentController = new AbortController();
+    controller = currentController;
+    const key = keySignal?.value;
     state.value = { ...state.value, status: 'loading', error: null };
-    try { const data = await loader(keySignal?.value, { signal: controller.signal }); if (!controller.signal.aborted) state.value = { status: 'ready', data, error: null }; }
-    catch (error) { if (!controller.signal.aborted) state.value = { status: 'error', data: null, error }; }
+    try {
+      const data = await loader(key, { signal: currentController.signal });
+      if (disposed || currentController.signal.aborted || currentId !== loadId) return state.value;
+      state.value = { status: 'ready', data, error: null };
+    } catch (error) {
+      if (disposed || currentController.signal.aborted || currentId !== loadId) return state.value;
+      state.value = { status: 'error', data: null, error };
+    }
+    return state.value;
   };
-  const dispose = keySignal ? effect(() => { load(); }, [keySignal]) : (() => { load(); return () => controller?.abort(); })();
+
+  const stop = keySignal ? effect(() => { void load(); }, [keySignal]) : (() => { void load(); return () => {}; })();
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    loadId += 1;
+    controller?.abort();
+    controller = null;
+    stop();
+  };
   return { state, reload: load, dispose };
 }
 
