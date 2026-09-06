@@ -59,7 +59,7 @@ export const a11y = Object.freeze({
 
 export class Router {
   constructor({ base = '/', history = null } = {}) {
-    this.base = base;
+    this.base = normalizeBase(base);
     this.history = history;
     this.routes = [];
     this.current = signal(null);
@@ -67,7 +67,17 @@ export class Router {
     this.navigationId = 0;
   }
   route(pattern, view, { load = null, name = null } = {}) { const compiled = compileRoute(pattern); this.routes.push({ pattern, view, load, name, ...compiled }); return this; }
-  match(url) { const pathname = new URL(url, 'http://sprout.local').pathname; for (const route of this.routes) { const match = route.regex.exec(pathname); if (!match) continue; return { route, params: Object.fromEntries(route.names.map((name, i) => [name, decodeURIComponent(match[i + 1])])) }; } return null; }
+  match(url) {
+    const pathname = new URL(url, 'http://sprout.local').pathname;
+    const relativePath = stripBase(pathname, this.base);
+    if (relativePath == null) return null;
+    for (const route of this.routes) {
+      const match = route.regex.exec(relativePath);
+      if (!match) continue;
+      return { route, params: Object.fromEntries(route.names.map((name, i) => [name, decodeURIComponent(match[i + 1])])) };
+    }
+    return null;
+  }
   async navigate(url, context = {}) {
     const navigationId = ++this.navigationId;
     this.abortController?.abort();
@@ -241,6 +251,17 @@ export function createDataResource(loader, keySignal) {
 }
 
 function compileRoute(pattern) { const names = []; const regexText = pattern.split('/').map((part) => part.startsWith(':') ? (names.push(part.slice(1)), '([^/]+)') : part === '*' ? '(.*)' : escapeRegex(part)).join('/'); return { names, regex: new RegExp(`^${regexText}/?$`) }; }
+function normalizeBase(base) {
+  if (typeof base !== 'string' || !base.startsWith('/')) throw new TypeError('router base must be an absolute pathname');
+  if (base === '/') return '/';
+  return `/${base.split('/').filter(Boolean).join('/')}`;
+}
+function stripBase(pathname, base) {
+  if (base === '/') return pathname;
+  if (pathname === base) return '/';
+  if (!pathname.startsWith(`${base}/`)) return null;
+  return pathname.slice(base.length) || '/';
+}
 function escapeRegex(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function normalizeHtml(value) { return String(value).replace(/\s+/g, ' ').replace(/> </g, '><').trim(); }
 function normalizeExpectedHtml(value, documentRef) {
