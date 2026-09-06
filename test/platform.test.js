@@ -50,3 +50,46 @@ test('data resources react to key changes', async () => {
   assert.equal(resource.state.value.data, 'B');
   resource.dispose();
 });
+
+test('data resources ignore stale success from an abort-ignoring loader', async () => {
+  const key = signal('slow');
+  const resolvers = new Map();
+  const resource = createDataResource((value) => new Promise((resolve) => resolvers.set(value, resolve)), key);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  key.value = 'fast';
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  resolvers.get('fast')('newer');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(resource.state.value, { status: 'ready', data: 'newer', error: null });
+  resolvers.get('slow')('stale');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(resource.state.value, { status: 'ready', data: 'newer', error: null });
+  resource.dispose();
+});
+
+test('data resources ignore stale failure after a newer load succeeds', async () => {
+  const key = signal('first');
+  const pending = new Map();
+  const resource = createDataResource((value) => new Promise((resolve, reject) => pending.set(value, { resolve, reject })), key);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  key.value = 'second';
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  pending.get('second').resolve('good');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  pending.get('first').reject(new Error('late failure'));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(resource.state.value, { status: 'ready', data: 'good', error: null });
+  resource.dispose();
+});
+
+test('disposing a data resource prevents late completion from committing state', async () => {
+  let resolveLoad;
+  const resource = createDataResource(() => new Promise((resolve) => { resolveLoad = resolve; }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(resource.state.value.status, 'loading');
+  resource.dispose();
+  resolveLoad('too-late');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(resource.state.value.status, 'loading');
+  assert.equal(resource.state.value.data, null);
+});
