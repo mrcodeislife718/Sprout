@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "description": "Sprout UI runtime for the Cannon ecosystem.",
   "type": "module",
-  "exports": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./recovery": "./src/disaster-recovery.js"
+  },
   "scripts": {
     "test": "node --test test/*.test.js",
     "test:browser": "node test/browser-proof.mjs"
