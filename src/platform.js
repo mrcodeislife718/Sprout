@@ -56,20 +56,44 @@ export const a11y = Object.freeze({
 });
 
 export class Router {
-  constructor({ base = '/', history = null } = {}) { this.base = base; this.history = history; this.routes = []; this.current = signal(null); this.abortController = null; }
+  constructor({ base = '/', history = null } = {}) {
+    this.base = base;
+    this.history = history;
+    this.routes = [];
+    this.current = signal(null);
+    this.abortController = null;
+    this.navigationId = 0;
+  }
   route(pattern, view, { load = null, name = null } = {}) { const compiled = compileRoute(pattern); this.routes.push({ pattern, view, load, name, ...compiled }); return this; }
   match(url) { const pathname = new URL(url, 'http://sprout.local').pathname; for (const route of this.routes) { const match = route.regex.exec(pathname); if (!match) continue; return { route, params: Object.fromEntries(route.names.map((name, i) => [name, decodeURIComponent(match[i + 1])])) }; } return null; }
   async navigate(url, context = {}) {
+    const navigationId = ++this.navigationId;
+    this.abortController?.abort();
+    const controller = new AbortController();
+    this.abortController = controller;
     const match = this.match(url);
-    if (!match) { this.current.value = { status: 404, url, route: null, params: {}, data: null }; return this.current.value; }
-    this.abortController?.abort(); this.abortController = new AbortController();
-    const data = match.route.load ? await match.route.load({ url, params: match.params, signal: this.abortController.signal, ...context }) : null;
+    if (!match) {
+      if (navigationId !== this.navigationId || controller.signal.aborted) return this.current.value;
+      const state = { status: 404, url, route: null, params: {}, data: null };
+      this.current.value = state;
+      this.history?.pushState?.({}, '', url);
+      return state;
+    }
+    let data = null;
+    try {
+      data = match.route.load ? await match.route.load({ url, params: match.params, signal: controller.signal, ...context }) : null;
+    } catch (error) {
+      if (controller.signal.aborted || navigationId !== this.navigationId) return this.current.value;
+      throw error;
+    }
+    if (controller.signal.aborted || navigationId !== this.navigationId) return this.current.value;
     const state = { status: 200, url, route: match.route, params: match.params, data };
     this.current.value = state;
     this.history?.pushState?.({}, '', url);
     return state;
   }
   view() { const state = this.current.value; if (!state?.route) return null; return state.route.view({ params: state.params, data: state.data, route: state.route }); }
+  dispose() { this.navigationId += 1; this.abortController?.abort(); this.abortController = null; }
 }
 
 export function createSsrResult(vnode, { state = {}, head = [] } = {}) {
